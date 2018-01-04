@@ -5,6 +5,30 @@
  * Date: 8/12/2017
  * Time: 9:43 AM
  */
+$dbLocation = 'mysql:dbname=canvas_animation;host=localhost';
+$dbUser = 'root';
+$dbPass = '';
+$db = new PDO($dbLocation, $dbUser, $dbPass, array(PDO::MYSQL_ATTR_INIT_COMMAND => 'SET NAMES \'utf8\''));
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST')
+{
+    switch ($_POST['method'])
+    {
+        case 'submit_canvas':
+            $tbl_canvas_fields = ['name','width','height','spot_radius','spot_gap','spot_text','mouse_radius'];
+            break;
+        case 'get_spots':
+            break;
+    }
+    exit;
+}
+
+$sql = 'SELECT * FROM tbl_entity_canvas';
+
+$query = $db->prepare($sql);
+$query->execute();
+$canvas_fetch = $query->fetchAll(PDO::FETCH_ASSOC);
+
 ?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -14,34 +38,44 @@
     <script src="jquery-1.9.1.min.js" type="application/javascript"></script>
     <style>
         body {display:block;width:100%;height:100%;}
+        .clear {clear: both;}
         .source_image_container,
         .canvas_container
         {display:inline-block;margin:0 1em 1em 0;background:#ffffff;border:2px solid #cccccc;}
+        .edit_mode canvas {cursor: pointer;}
         #body_info_display {display:block;width:1000px;min-height:50px;margin:0 auto;}
         .input_row_container {display: block;padding: 5px 0;}
         .input_row_container label {display:inline-block;width:200px;padding-right: 10px;}
+        .form_container,
+        .point_editor_container {display: inline-block; padding: 0 10px; vertical-align: top;}
+        .hidden_container {display: none;}
     </style>
 </head>
 
 <body>
 <div class="source_image_container"></div>
 <div class="canvas_container"></div>
+<div class="clear"></div>
 <div class="form_container">
     <form action="" method="post">
+        <input type="hidden" id="canvas_id" name="id" value="">
         <div class="input_row_container">
-            <label for="spot_radius">Spot Radius</label><input type="text" id="spot_radius" placeholder="Spot Radius" value="5">
+            <label for="canvas_name">Canvas Name</label><input type="text" id="canvas_name" name="name" placeholder="Canvas Name" value="">
         </div>
         <div class="input_row_container">
-            <label for="spot_gap">Spot Gap</label><input type="text" id="spot_gap" placeholder="Spot Gap" value="0">
+            <label for="spot_radius">Spot Radius</label><input type="text" id="spot_radius" name="spot_radius" placeholder="Spot Radius" value="5">
         </div>
         <div class="input_row_container">
-            <label for="spot_text">Spot Text</label><input type="text" id="spot_text" placeholder="Spot Text" value="+">
+            <label for="spot_gap">Spot Gap</label><input type="text" id="spot_gap" name="spot_gap" placeholder="Spot Gap" value="0">
         </div>
         <div class="input_row_container">
-            <label for="mouse_radius">Mouse Radius</label><input type="text" id="mouse_radius" placeholder="Mouse Radius" value="100">
+            <label for="spot_text">Spot Text</label><input type="text" id="spot_text" name="spot_text" placeholder="Spot Text" value="+">
         </div>
         <div class="input_row_container">
-            <label for="transfer_transparent">Transfer Half Transparent Points</label><input type="checkbox" id="transfer_transparent" value="1" checked>
+            <label for="mouse_radius">Mouse Radius</label><input type="text" id="mouse_radius" name="mouse_radius" placeholder="Mouse Radius" value="100">
+        </div>
+        <div class="input_row_container">
+            <label for="transfer_transparent">Transfer Half Transparent Points</label><input type="checkbox" id="transfer_transparent" name="transfer_transparent" value="1" checked>
         </div>
     </form>
     <div class="input_row_container">
@@ -51,8 +85,28 @@
         <input type='file' id='upload'>
     </div>
 </div>
-<div class="point_editor_container">
-
+<div class="point_editor_container hidden_container">
+    <div class="input_row_container">
+        <label for="point_opacity">Opacity (0 to remove point)</label><input type="text" id="point_opacity" placeholder="Point Opacity" value="1">
+    </div>
+    <div class="input_row_container">
+        <label for="point_x">X</label><input type="text" id="point_x" placeholder="Point Location X" value="">
+    </div>
+    <div class="input_row_container">
+        <label for="point_y">Y</label><input type="text" id="point_y" placeholder="Point Location Y" value="">
+    </div>
+    <div class="input_row_container">
+        <label for="point_r">R</label><input type="text" id="point_r" placeholder="Point Color Red" value="">
+    </div>
+    <div class="input_row_container">
+        <label for="point_g">G</label><input type="text" id="point_g" placeholder="Point Color Green" value="">
+    </div>
+    <div class="input_row_container">
+        <label for="point_b">B</label><input type="text" id="point_b" placeholder="Point Color Blue" value="">
+    </div>
+    <div class="input_row_container">
+        <input type="button" id="point_submit" value="Submit Changes">
+    </div>
 </div>
 <div id="body_info_display">
     <table id="source_points"></table>
@@ -79,10 +133,13 @@
             if($('#edit_mode').prop('checked'))
             {
                 status = 2;
+                $('.canvas_container').addClass('edit_mode');
             }
             else
             {
                 status = 1;
+                $('.canvas_container').removeClass('edit_mode');
+                $('.point_editor_container').addClass('hidden_container');
             }
         });
         var spots_init = new Array();		// Random Points Array Now, should be predefinedin future
@@ -115,6 +172,9 @@
 //        spot_row_offset = spot_row_offset%spot_size;
         var image_width_max = 1200;
         var image_width_min = 300;
+
+        var edit_point_index;
+        var edit_point;
 
         // Attach event listener
         $('#upload').change(function (e){
@@ -166,6 +226,7 @@
             spots = [];
             spots_init = [];
             ctx.drawImage(img,0,0); // Load Image on top left
+            $('#source_points').html('');
             for (i=0;i<canvas_height_units;i++ )
             {
                 for (j=0;j<canvas_width_units;j++ )
@@ -173,15 +234,15 @@
                     var pixelData = ctx.getImageData((j+0.5)*spot_size+(i*spot_row_offset)%spot_size, (i+0.5)*spot_size, 1, 1).data;
 //console.log(pixelData);
 
+                    pixelData[3] = (pixelData[3]/255).toFixed(2);
                     if ($('#transfer_transparent').prop('checked'))
                     {
-                        pixelData[3] = Math.round(pixelData[3]/255)*255;
+                        pixelData[3] = Math.round(pixelData[3]);
                     }
 
                     if(pixelData[3] != 0)
                     {
-                        var spot_color = [pixelData[0],pixelData[1],pixelData[2],pixelData[3]/255];
-                        var spot_data = [(j+0.5)*spot_size+(i*spot_row_offset)%spot_size,(i+0.5)*spot_size,'rgba('+spot_color.join(',')+')'];
+                        var spot_data = [(j+0.5)*spot_size+(i*spot_row_offset)%spot_size,(i+0.5)*spot_size,pixelData[0],pixelData[1],pixelData[2],pixelData[3]];
                         $('#source_points').append('<tr><td>'+spot_data.join('</td><td>')+'</td></tr>');
                         spots_init.push(spot_data);
                     }
@@ -196,14 +257,14 @@
             {
                 for(i=0;i<spot_array_size;i++)
                 {
-                    spots_init[i] = new Array(Math.random()*canvas_width*0.9 + canvas_width*0.05, Math.random()*canvas_height*0.9 + canvas_height*0.05,'#000000');
+                    spots_init[i] = new Array(Math.random()*canvas_width*0.9 + canvas_width*0.05, Math.random()*canvas_height*0.9 + canvas_height*0.05,0,0,0,1);
                 }
             }
             //console.log(spots_init);
 
             for(i=0;i<spot_array_size;i++)
             {
-                spots[i] = new Array(spots_init[i][0], spots_init[i][1], spots_init[i][0], spots_init[i][1], Math.random()*canvas_width*0.9 + canvas_width*0.05, Math.random()*canvas_height*0.9 + canvas_height*0.05, 0, 0, spots_init[i][2]);
+                spots[i] = new Array(spots_init[i][0], spots_init[i][1], spots_init[i][0], spots_init[i][1], Math.random()*canvas_width*0.9 + canvas_width*0.05, Math.random()*canvas_height*0.9 + canvas_height*0.05, 0, 0, 'rgba('+spots_init[i][2]+','+spots_init[i][3]+','+spots_init[i][4]+','+spots_init[i][5]+')');
             }
             if(location.search.indexOf('debug=1')>-1) $('#body_info_display').html(display);
 
@@ -211,10 +272,12 @@
             if($('#edit_mode').prop('checked'))
             {
                 status = 2;
+                $('.canvas_container').addClass('edit_mode');
             }
             else
             {
                 status = 1;
+                $('.canvas_container').removeClass('edit_mode');
             }
             draw_canvas();
         });
@@ -255,71 +318,83 @@
 
             ctx.clearRect(0, 0, canvas_width, canvas_height);
             ctx.font = "bold "+spot_radius*4+"px Arial";
-            for(i=0;i<spot_array_size;i++)
+            if (status == 1)
             {
-                // Change Current Position according to velocity (speed)
-                if(((spots[i][4]-spots[i][2])*(spots[i][4]-spots[i][2]) + (spots[i][5]-spots[i][3])*(spots[i][5]-spots[i][2])) < 1 && (spots[i][6]*spots[i][6] + spots[i][7]*spots[i][7]) < 0.1 )
+                for(i=0;i<spot_array_size;i++)
                 {
-                    spots[i][4] = spots[i][2];
-                    spots[i][5] = spots[i][3];
-                    spots[i][6] = 0;
-                    spots[i][7] = 0;
-                }
-                else
-                {
-                    spots[i][4] = spots[i][4] + spots[i][6];
-                    spots[i][5] = spots[i][5] + spots[i][7];
-                }
+                    // Change Current Position according to velocity (speed)
+                    if(((spots[i][4]-spots[i][2])*(spots[i][4]-spots[i][2]) + (spots[i][5]-spots[i][3])*(spots[i][5]-spots[i][2])) < 1 && (spots[i][6]*spots[i][6] + spots[i][7]*spots[i][7]) < 0.1 )
+                    {
+                        spots[i][4] = spots[i][2];
+                        spots[i][5] = spots[i][3];
+                        spots[i][6] = 0;
+                        spots[i][7] = 0;
+                    }
+                    else
+                    {
+                        spots[i][4] = spots[i][4] + spots[i][6];
+                        spots[i][5] = spots[i][5] + spots[i][7];
+                    }
 
-                // Fix spot to static statue if error happens
-                if(isNaN(spots[i][4]))
-                {
-                    spots[i][4] = canvas_width*(Math.round(Math.random()));
-                    spots[i][6] = 0;
-                }
-                if(isNaN(spots[i][5]))
-                {
-                    spots[i][5] = canvas_height*(Math.round(Math.random()));
-                    spots[i][7] = 0;
-                }
+                    // Fix spot to static statue if error happens
+                    if(isNaN(spots[i][4]))
+                    {
+                        spots[i][4] = canvas_width*(Math.round(Math.random()));
+                        spots[i][6] = 0;
+                    }
+                    if(isNaN(spots[i][5]))
+                    {
+                        spots[i][5] = canvas_height*(Math.round(Math.random()));
+                        spots[i][7] = 0;
+                    }
 
-                // Change Speed if spot inside cursor circle
-                k = Math.sqrt(((spots[i][4]-page_coords[0])*(spots[i][4]-page_coords[0]) + (spots[i][5]-page_coords[1])*(spots[i][5]-page_coords[1])) / ((mouse_radius+spot_radius)*(mouse_radius+spot_radius)));
-                if( k < 1 ) // Hit Happens for Spot i
-                {
-                    // Set Speed
-                    spots[i][6] = spots[i][6] + speed_constant_hit*(1-k)/k * (spots[i][4] - page_coords[0]);
-                    spots[i][7] = spots[i][7] + speed_constant_hit*(1-k)/k * (spots[i][5] - page_coords[1]);
+                    // Change Speed if spot inside cursor circle
+                    k = Math.sqrt(((spots[i][4]-page_coords[0])*(spots[i][4]-page_coords[0]) + (spots[i][5]-page_coords[1])*(spots[i][5]-page_coords[1])) / ((mouse_radius+spot_radius)*(mouse_radius+spot_radius)));
+                    if( k < 1 ) // Hit Happens for Spot i
+                    {
+                        // Set Speed
+                        spots[i][6] = spots[i][6] + speed_constant_hit*(1-k)/k * (spots[i][4] - page_coords[0]);
+                        spots[i][7] = spots[i][7] + speed_constant_hit*(1-k)/k * (spots[i][5] - page_coords[1]);
 
-                }
+                    }
 
-                // Change Speed according to current position
-                spots[i][6] += speed_constant_gravity*(spots[i][2]-spots[i][4]);
-                spots[i][7] += speed_constant_gravity*(spots[i][3]-spots[i][5]);
+                    // Change Speed according to current position
+                    spots[i][6] += speed_constant_gravity*(spots[i][2]-spots[i][4]);
+                    spots[i][7] += speed_constant_gravity*(spots[i][3]-spots[i][5]);
 
-                // Change Speed according to ground friction
-                if(spots[i][6]*spots[i][6] + spots[i][7]*spots[i][7] > 0.01)
-                {
-                    spots[i][6] *= speed_constant_friction;
-                    spots[i][7] *= speed_constant_friction;
-                }
+                    // Change Speed according to ground friction
+                    if(spots[i][6]*spots[i][6] + spots[i][7]*spots[i][7] > 0.01)
+                    {
+                        spots[i][6] *= speed_constant_friction;
+                        spots[i][7] *= speed_constant_friction;
+                    }
 
 
-                // Draw spot
-                ctx.beginPath();
-                ctx.fillStyle = spots[i][8];
-                ctx.fillText(spot_text,spots[i][4]-spot_radius*1.1,spots[i][5]+spot_radius*1.4);
-                //ctx.arc(spots[i][4],spots[i][5],spot_radius,0,2*Math.PI);
-                ctx.fill();
-
-                if (status == 2)
-                {
+                    // Draw spot
                     ctx.beginPath();
-                    ctx.arc(spots[i][4], spots[i][5], spot_radius, 0, 2 * Math.PI, false);
-                    ctx.lineWidth = 1;
-                    ctx.strokeStyle = '#333333';
-                    ctx.stroke();
+                    ctx.fillStyle = spots[i][8];
+                    ctx.fillText(spot_text,spots[i][4]-spot_radius*1.1,spots[i][5]+spot_radius*1.4);
+                    //ctx.arc(spots[i][4],spots[i][5],spot_radius,0,2*Math.PI);
+                    ctx.fill();
                 }
+            }
+            if (status == 2)
+            {
+                for(i=0;i<spot_array_size;i++)
+                {
+                    // Draw spot
+                    ctx.beginPath();
+                    ctx.fillStyle = 'rgba('+spots_init[i][2]+','+spots_init[i][3]+','+spots_init[i][4]+','+spots_init[i][5]+')';
+                    ctx.fillText(spot_text,spots_init[i][0]-spot_radius*1.1,spots_init[i][1]+spot_radius*1.4);
+                    //ctx.arc(spots[i][4],spots[i][5],spot_radius,0,2*Math.PI);
+                    ctx.fill();
+
+                }
+                ctx.beginPath();
+                ctx.arc((Math.floor(page_coords[0]/spot_size)+0.5)*spot_size, (Math.floor(page_coords[1]/spot_size)+0.5)*spot_size, spot_size/2, 0, 2 * Math.PI, false);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = '#333333';
+                ctx.stroke();
             }
             /*ctx.beginPath();
              ctx.arc(page_coords[0],page_coords[1],mouse_radius,0,2*Math.PI);
@@ -336,10 +411,10 @@
 
 
 
-        $(".canvas_container").mousemove(function(event) {
+        $('.canvas_container').mousemove(function(event) {
+            page_coords = Array(event.pageX - $(".canvas_container canvas").offset().left, event.pageY - $(".canvas_container canvas").offset().top);
             if(status == 1)
             {
-                page_coords = Array(event.pageX - $(".canvas_container canvas").offset().left, event.pageY - $(".canvas_container canvas").offset().top);
 //                client_coords = Array(event.clientX, event.clientY);
                 end_time_2 = new Date();
                 time_difference_2 = end_time_2 - start_time_2;
@@ -403,6 +478,101 @@
             }
 
             //$('#body_info_display').html('Page: '+page_coords+'<br>Client: '+client_coords+'<br>Speed: '+speed+'<br>Average Speed: '+average_speed+' '+(Math.log(average_speed)/Math.LN10+3)+'<br>Spot Position: '+spots+'<br>Spot Distance: '+Math.sqrt((spots[0][0]-page_coords[0])*(spots[0][0]-page_coords[0]) + (spots[0][1]-page_coords[1])*(spots[0][1]-page_coords[1]))+'');
+        });
+        $('.canvas_container').click(function(event){
+            if(status == 2)
+            {
+                $('.point_editor_container').removeClass('hidden_container');
+                var x = (Math.floor(page_coords[0]/spot_size)+0.5)*spot_size;
+                var y = (Math.floor(page_coords[1]/spot_size)+0.5)*spot_size;
+                $('#point_x').val(x);
+                $('#point_y').val(y);
+
+                for(i=0;i<spot_array_size;i++)
+                {
+                    if (spots_init[i][0]>=x && spots_init[i][1]>=y)
+                    {
+                        if (spots_init[i][0]==x && spots_init[i][1]==y)
+                        {
+                            edit_point = spots_init[i];
+                        }
+                        else
+                        {
+                            if (i > 0)
+                            {
+                                edit_point = [x,y,spots_init[i-1][2],spots_init[i-1][3],spots_init[i-1][4],0];
+                            }
+                            else
+                            {
+                                edit_point = [x,y,spots_init[i][2],spots_init[i][3],spots_init[i][4],0];
+                            }
+                        }
+                        $('#point_r').val(edit_point[2]);
+                        $('#point_g').val(edit_point[3]);
+                        $('#point_b').val(edit_point[4]);
+                        $('#point_opacity').val(edit_point[5]);
+                        break;
+                    }
+                }
+            }
+        })
+        $('.point_editor_container').on('change','input',function(){
+            if ($(this).attr('id') == 'point_x' || $(this).attr('id') == 'point_y')
+            {
+                $(this).val((Math.floor($(this).val()/spot_size)+0.5)*spot_size);
+            }
+            edit_point = [parseInt($('#point_x').val()),parseInt($('#point_y').val()),parseInt($('#point_r').val()),parseInt($('#point_g').val()),parseInt($('#point_b').val()),parseInt($('#point_opacity').val())];
+
+        });
+        $('#point_submit').click(function(){
+            if(status == 2)
+            {
+                for(i=0;i<spot_array_size;i++)
+                {
+                    if (spots_init[i][0]>=$('#point_x').val() && spots_init[i][1]>=$('#point_y').val())
+                    {
+
+                        if (spots_init[i][0]==$('#point_x').val() && spots_init[i][1]==$('#point_y').val())
+                        {
+                            if (edit_point[5] > 0)
+                            {
+                                spots_init[i] = edit_point;
+                            }
+                            else
+                            {
+                                spots_init.splice(i,1);
+                            }
+                        }
+                        else
+                        {
+                            if (edit_point[5] > 0)
+                            {
+                                edit_point_index = i;
+                                spots_init.splice(i,0,edit_point);
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (i == spot_array_size)
+                {
+                    spots_init.splice(i,0,edit_point);
+                }
+                if(spots_init.length > 0)
+                {
+                    spot_array_size = spots_init.length;
+                }
+                //console.log(spots_init);
+
+                spots = [];
+                $('#source_points').html('');
+                for(i=0;i<spot_array_size;i++)
+                {
+                    spots[i] = new Array(spots_init[i][0], spots_init[i][1], spots_init[i][0], spots_init[i][1], Math.random()*canvas_width*0.9 + canvas_width*0.05, Math.random()*canvas_height*0.9 + canvas_height*0.05, 0, 0, 'rgba('+spots_init[i][2]+','+spots_init[i][3]+','+spots_init[i][4]+','+spots_init[i][5]+')');
+                    $('#source_points').append('<tr><td>'+spots_init[i].join('</td><td>')+'</td></tr>');
+                }
+                draw_canvas();
+            }
         });
     });
 </script>
